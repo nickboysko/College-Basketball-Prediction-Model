@@ -1,0 +1,126 @@
+# ============================================================================
+# SENSITIVE FILES - NEVER COMMIT THESE
+# ============================================================================
+
+# API Keys and Credentials
+odds_api_key
+odds_api_key.txt
+odds_api_key.template
+*.key
+*.secret
+.env
+config.ini
+
+# ============================================================================
+# MODEL FILES - TOO LARGE FOR GIT
+# ============================================================================
+
+# Trained Models (use Git LFS or store separately)
+*.pkl
+*.h5
+*.model
+*.joblib
+
+# ============================================================================
+# DATA FILES - TOO LARGE OR TEMPORARY
+# ============================================================================
+
+# Large CSV files
+training_data.csv
+training_data_enhanced.csv
+teamrankings_*.csv
+*_team_results.csv
+
+# Daily/Temporary Data
+todays_games_raw.csv
+todays_games_merged.csv
+todays_predictions.csv
+
+# ============================================================================
+# PYTHON
+# ============================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# ============================================================================
+# IDE / EDITOR
+# ============================================================================
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================================================
+# OPERATING SYSTEM
+# ============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ============================================================================
+# PROJECT SPECIFIC
+# ============================================================================
+
+# Old/Archive folders
+Old/
+Archive/
+Backup/
+
+# Output files
+predictions_*.csv
+results_*.csv
+analysis_*.xlsx
+
+# Logs
+*.log
+logs/
+
+# Cache
+.cache/
+*.cache
