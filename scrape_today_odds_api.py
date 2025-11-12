@@ -105,36 +105,25 @@ try:
                         if market['key'] == 'spreads':
                             outcomes = market['outcomes']
                             
-                            # Find home and away team spreads
+                            # Find home team spread
                             home_spread = None
-                            away_spread = None
                             
                             for outcome in outcomes:
                                 if outcome['name'] == home_team:
                                     home_spread = outcome['point']
-                                elif outcome['name'] == away_team:
-                                    away_spread = outcome['point']
+                                    break
                             
-                            # Add both directions (home team perspective and away team perspective)
-                            if home_spread is not None and away_spread is not None:
+                            # Only add ONE entry per game (home team perspective)
+                            # This matches your training data format where each game appears once
+                            if home_spread is not None:
                                 # Map team names from Odds API format to Barttorvik format
                                 home_team_mapped = map_team_name(home_team)
                                 away_team_mapped = map_team_name(away_team)
                                 
-                                # Home team as "team"
                                 games.append({
-                                    'team': home_team_mapped,
-                                    'opp': away_team_mapped,
+                                    'team': home_team_mapped,  # Home team
+                                    'opp': away_team_mapped,   # Away team
                                     'spread': home_spread,
-                                    'game_date': date_str,
-                                    'season': season_str
-                                })
-                                
-                                # Away team as "team" 
-                                games.append({
-                                    'team': away_team_mapped,
-                                    'opp': home_team_mapped,
-                                    'spread': away_spread,
                                     'game_date': date_str,
                                     'season': season_str
                                 })
@@ -150,25 +139,19 @@ try:
     # Save to CSV
     df = pd.DataFrame(games)
     
-    # Remove duplicates (some teams might appear twice)
-    df = df.drop_duplicates(subset=['team', 'opp'])
-    
+    # No need to remove duplicates now since we only create one entry per game
     output_file = 'todays_games_raw.csv'
     df.to_csv(output_file, index=False)
     
-    print(f"\n[OK] Saved {len(df)} game entries to {output_file}")
-    print(f"[INFO] This represents {len(df)//2} unique matchups")
+    print(f"\n[OK] Saved {len(df)} games to {output_file}")
     
     print("\n" + "="*80)
     print("SCRAPING COMPLETE")
     print("="*80)
-    print("\nSample games:")
-    for i, game in enumerate(games[:10], 1):
+    print("\nGames found:")
+    for i, game in enumerate(games, 1):
         spread_sign = '+' if game['spread'] > 0 else ''
         print(f"  {i}. {game['team']} ({spread_sign}{game['spread']}) vs {game['opp']}")
-    
-    if len(games) > 10:
-        print(f"  ... and {len(games)-10} more")
     
     print(f"\n[NEXT] Run: python merge_today.py")
     

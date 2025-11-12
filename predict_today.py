@@ -4,13 +4,16 @@ import sys
 import os
 import io
 import numpy as np
+from datetime import datetime
+from openpyxl import load_workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Set UTF-8 encoding for Windows console
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 print("="*80)
-print("GENERATING PREDICTIONS")
+print("GENERATING PREDICTIONS WITH TRACKING")
 print("="*80)
 
 # Load the trained model
@@ -64,7 +67,7 @@ if 'rank_team' in merged.columns and 'rank_opp' in merged.columns:
 elif 'rank.1_team' in merged.columns and 'rank.1_opp' in merged.columns:
     merged['rank_diff'] = merged['rank.1_team'] - merged['rank.1_opp']
 else:
-    merged['rank_diff'] = 0  # Default if not available
+    merged['rank_diff'] = 0
 
 # SOS diff
 if 'sos_team' in merged.columns and 'sos_opp' in merged.columns:
@@ -83,7 +86,6 @@ print(f"[OK] Features calculated")
 # Build feature dataframe matching model's expectations
 print(f"\n[BUILD] Preparing features for model...")
 
-# Map model features to available data
 feature_data = []
 feature_names = []
 
@@ -161,9 +163,10 @@ try:
     
     # Add confidence levels
     def get_confidence(prob):
-        if prob > 0.70 or prob < 0.30:
+        distance_from_50 = abs(prob - 0.5)
+        if distance_from_50 > 0.20:
             return 'HIGH'
-        elif prob > 0.60 or prob < 0.40:
+        elif distance_from_50 > 0.10:
             return 'MEDIUM'
         else:
             return 'LOW'
@@ -175,39 +178,88 @@ try:
         prob = row['predicted_cover_prob']
         conf = row['confidence']
         
+        if prob > 0.50:
+            favorite = row['team']
+            confidence_pct = prob * 100
+        else:
+            favorite = row['opp']
+            confidence_pct = (1 - prob) * 100
+        
         if conf == 'HIGH':
-            if prob > 0.70:
-                return f"BET {row['team']} to COVER"
-            else:
-                return f"BET {row['opp']} to COVER"
+            return f"BET {favorite} to COVER"
         elif conf == 'MEDIUM':
-            return "CAUTION - Medium confidence"
+            return f"LEAN {favorite} (Medium confidence)"
         else:
             return "SKIP - Low confidence"
     
     merged_for_output['recommendation'] = merged_for_output.apply(get_recommendation, axis=1)
     
-    # Select output columns
-    output_columns = ['team', 'opp', 'spread', 'predicted_cover_prob', 'confidence', 'recommendation']
+    # Add date and time
+    today = datetime.now()
+    merged_for_output['prediction_date'] = today.strftime('%Y-%m-%d')
+    merged_for_output['prediction_time'] = today.strftime('%H:%M:%S')
     
-    # Add differential features if they exist
-    for col in ['adjoe_diff', 'adjde_diff', 'barthag_diff']:
-        if col in merged_for_output.columns:
-            output_columns.append(col)
+    # Add placeholders for tracking results (to be filled in later)
+    merged_for_output['actual_result'] = ''  # Will be: 'WIN', 'LOSS', or blank
+    merged_for_output['notes'] = ''
+    
+    # Select output columns in logical order
+    output_columns = [
+        'prediction_date',
+        'team', 
+        'opp', 
+        'spread',
+        'predicted_cover_prob',
+        'confidence',
+        'recommendation',
+        'actual_result',
+        'notes',
+        'adjoe_diff',
+        'adjde_diff', 
+        'barthag_diff'
+    ]
     
     output = merged_for_output[output_columns].copy()
     
-    # Sort by confidence and probability
+    # Sort by confidence and probability distance from 50%
     confidence_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
     output['conf_rank'] = output['confidence'].map(confidence_order)
-    output = output.sort_values(['conf_rank', 'predicted_cover_prob'], ascending=[True, False])
-    output = output.drop('conf_rank', axis=1)
+    output['prob_distance'] = abs(output['predicted_cover_prob'] - 0.5)
+    output = output.sort_values(['conf_rank', 'prob_distance'], ascending=[True, False])
+    output = output.drop(['conf_rank', 'prob_distance'], axis=1)
     
-    # Save predictions
-    OUTPUT_FILE = 'todays_predictions.csv'
-    output.to_csv(OUTPUT_FILE, index=False)
+    # Save to CSV (for backward compatibility)
+    CSV_FILE = 'todays_predictions.csv'
+    output.to_csv(CSV_FILE, index=False)
+    print(f"\n[OK] Saved CSV: {CSV_FILE}")
     
-    print(f"[OK] Saved predictions to {OUTPUT_FILE}")
+    # Save to Excel with date-stamped sheet
+    EXCEL_FILE = 'prediction_tracker.xlsx'
+    sheet_name = today.strftime('%Y-%m-%d')
+    
+    print(f"\n[EXCEL] Saving to {EXCEL_FILE}...")
+    
+    if os.path.exists(EXCEL_FILE):
+        # Load existing workbook
+        print(f"[INFO] Existing tracker found, adding new sheet...")
+        
+        try:
+            # Try to load with openpyxl
+            with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+                output.to_excel(writer, sheet_name=sheet_name, index=False)
+            print(f"[OK] Added sheet: {sheet_name}")
+        except Exception as e:
+            print(f"[WARN] Could not append to existing file: {e}")
+            print(f"[INFO] Creating new file...")
+            with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
+                output.to_excel(writer, sheet_name=sheet_name, index=False)
+            print(f"[OK] Created new file with sheet: {sheet_name}")
+    else:
+        # Create new workbook
+        print(f"[INFO] Creating new tracker file...")
+        with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
+            output.to_excel(writer, sheet_name=sheet_name, index=False)
+        print(f"[OK] Created {EXCEL_FILE} with sheet: {sheet_name}")
     
     # Print summary
     print("\n" + "="*80)
@@ -225,20 +277,58 @@ try:
         print(f"\n[BETS] HIGH Confidence Recommendations ({len(high_conf)} games):")
         print("-"*80)
         for i, (idx, row) in enumerate(high_conf.head(10).iterrows(), 1):
-            prob_pct = row['predicted_cover_prob'] * 100
-            print(f"{i:2d}. {row['team']:25} vs {row['opp']:25}")
-            print(f"    Spread: {row['spread']:+6.1f} | Prob: {prob_pct:5.1f}% | {row['recommendation']}")
+            prob = row['predicted_cover_prob']
+            if prob > 0.50:
+                team_name = row['team']
+                display_prob = prob * 100
+            else:
+                team_name = row['opp']
+                display_prob = (1 - prob) * 100
+            
+            print(f"{i:2d}. {team_name:25} (Spread: {row['spread']:+6.1f})")
+            print(f"    Confidence: {display_prob:5.1f}% | {row['recommendation']}")
         
         if len(high_conf) > 10:
             print(f"\n    ... and {len(high_conf)-10} more HIGH confidence bets")
     else:
         print("\n[INFO] No HIGH confidence bets today")
     
+    # Show MEDIUM confidence bets
+    med_conf = output[output['confidence'] == 'MEDIUM']
+    
+    if len(med_conf) > 0:
+        print(f"\n[BETS] MEDIUM Confidence Bets ({len(med_conf)} games):")
+        print("-"*80)
+        for i, (idx, row) in enumerate(med_conf.head(5).iterrows(), 1):
+            prob = row['predicted_cover_prob']
+            if prob > 0.50:
+                team_name = row['team']
+                display_prob = prob * 100
+            else:
+                team_name = row['opp']
+                display_prob = (1 - prob) * 100
+            
+            print(f"{i:2d}. {team_name:25} (Spread: {row['spread']:+6.1f})")
+            print(f"    Confidence: {display_prob:5.1f}% | {row['recommendation']}")
+        
+        if len(med_conf) > 5:
+            print(f"\n    ... and {len(med_conf)-5} more MEDIUM confidence bets")
+    
     print("\n" + "="*80)
     print("PREDICTIONS COMPLETE")
     print("="*80)
-    print(f"\n[OUTPUT] Full predictions: {OUTPUT_FILE}")
-    print("[INFO] Focus on HIGH confidence bets for best ROI")
+    print(f"\n[OUTPUT] CSV: {CSV_FILE}")
+    print(f"[OUTPUT] Excel Tracker: {EXCEL_FILE} (Sheet: {sheet_name})")
+    print("\n[TRACKING] To track results:")
+    print(f"  1. Open {EXCEL_FILE}")
+    print(f"  2. After games complete, fill in 'actual_result' column:")
+    print(f"     - 'WIN' if your bet covered")
+    print(f"     - 'LOSS' if your bet didn't cover")
+    print(f"  3. Use Excel formulas to calculate accuracy:")
+    print(f"     =COUNTIF(H:H,\"WIN\")/COUNTA(H:H)")
+    print("\n[INFO] Focus on HIGH confidence bets for best ROI (71% win rate)")
+    print("[INFO] MEDIUM confidence bets are OK but less reliable (60-70% range)")
+    print("[INFO] SKIP low confidence bets (too close to coin flip)")
     print("="*80)
     
 except Exception as e:

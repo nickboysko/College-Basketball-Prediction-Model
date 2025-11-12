@@ -2,6 +2,7 @@ import pandas as pd
 from datetime import datetime
 import sys
 import os
+from team_name_mapping import map_team_name
 
 # Set UTF-8 encoding for Windows console
 if sys.platform == 'win32':
@@ -46,6 +47,34 @@ print("[OK] Loaded todays_games_raw.csv")
 todays_games = pd.read_csv('todays_games_raw.csv')
 
 print(f"[OK] Found {len(todays_games)} games for today")
+
+# ============================================================================
+# APPLY TEAM NAME MAPPING (THIS IS THE FIX!)
+# ============================================================================
+print("\nStep 2.5: Applying team name mapping...")
+print("-"*80)
+
+# Store original names for reference
+todays_games['team_original'] = todays_games['team']
+todays_games['opp_original'] = todays_games['opp']
+
+# Apply mapping
+todays_games['team'] = todays_games['team'].apply(map_team_name)
+todays_games['opp'] = todays_games['opp'].apply(map_team_name)
+
+# Show what was mapped
+mapped_teams = todays_games[todays_games['team'] != todays_games['team_original']]
+mapped_opps = todays_games[todays_games['opp'] != todays_games['opp_original']]
+
+if len(mapped_teams) > 0:
+    print(f"[OK] Mapped {len(mapped_teams)} team names:")
+    for _, row in mapped_teams.iterrows():
+        print(f"  {row['team_original']} → {row['team']}")
+
+if len(mapped_opps) > 0:
+    print(f"[OK] Mapped {len(mapped_opps)} opponent names:")
+    for _, row in mapped_opps.iterrows():
+        print(f"  {row['opp_original']} → {row['opp']}")
 
 print("\nStep 3: Merging team stats...")
 print("-"*80)
