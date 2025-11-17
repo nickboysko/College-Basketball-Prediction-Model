@@ -13,8 +13,8 @@ print("=" * 80)
 
 # Load data
 print("\nLoading data...")
-train = pd.read_csv('training_data.csv')
-test = pd.read_csv('testing_data.csv')
+train = pd.read_csv('training_data_enhanced.csv')
+test = pd.read_csv('testing_data_enhanced.csv')
 
 print(f"Training data: {len(train)} games")
 print(f"Testing data: {len(test)} games")
@@ -22,28 +22,122 @@ print(f"Testing data: {len(test)} games")
 # Select feature columns to use in the model
 feature_columns = [
     'spread',
+    # Core efficiency
     'adjoe_diff',
     'adjde_diff', 
     'adjt_diff',
     'barthag_diff',
     'rank_diff',
+    # Strength of schedule
     'sos_diff',
+    'ncsos_diff',
+    # Shooting efficiency
+    'efg_pct_diff',
+    'efgd_pct_diff',
+    # Turnovers
+    'tor_diff',
+    'tord_diff',
+    # Rebounding
+    'orb_diff',
+    'drb_diff',
+    # Free throws
+    'ftr_diff',
+    'ftrd_diff',
+    # 2-point shooting
+    'twop_pct_diff',
+    'twopd_pct_diff',
+    # 3-point shooting
+    'threep_pct_diff',
+    'threepd_pct_diff',
+    # Raw stats
     'home_adjoe',
     'away_adjoe',
     'home_adjde',
     'away_adjde',
     'home_barthag',
-    'away_barthag'
+    'away_barthag',
+    # NEW MOMENTUM FEATURES
+    'home_ats_last_5',
+    'away_ats_last_5',
+    'ats_diff_last_5',
+    'home_ats_last_10',
+    'away_ats_last_10',
+    'ats_diff_last_10',
+    'home_ats_streak',
+    'away_ats_streak',
+    'rest_advantage',
+    'home_rest_days',
+    'away_rest_days',
+    'margin_trend',
+    'recent_opp_strength',
+    'early_season',
+    'pace_mismatch',
+    'combined_pace',
+    'three_point_matchup',
+    'turnover_matchup',
+    'rebounding_matchup',
+    'home_games_played',
+    'away_games_played',
 ]
 
 target = 'home_covered'
 
-# Remove rows with missing data
-print("\nRemoving rows with missing data...")
-train_clean = train.dropna(subset=feature_columns + [target])
-test_clean = test.dropna(subset=feature_columns + [target])
+# Handle missing data intelligently
+print("\nHandling missing data...")
 
-print(f"Training data after cleaning: {len(train_clean)} games ({len(train_clean)/len(train)*100:.1f}%)")
+# Check what features have the most missing values
+print("\nChecking missing values in features:")
+missing_counts = train[feature_columns].isna().sum()
+high_missing = missing_counts[missing_counts > len(train) * 0.5]
+if len(high_missing) > 0:
+    print(f"Features with >50% missing values:")
+    for feat, count in high_missing.items():
+        print(f"  {feat}: {count}/{len(train)} ({count/len(train)*100:.1f}%)")
+
+# Instead of dropping, FILL missing values with reasonable defaults
+print("\nFilling missing values with sensible defaults...")
+
+# For momentum features, fill with neutral values
+momentum_features = [f for f in feature_columns if any(x in f for x in ['ats', 'streak', 'rest', 'trend', 'opp_strength', 'games_played'])]
+for feat in momentum_features:
+    if feat in train.columns:
+        if 'ats' in feat and 'diff' not in feat and 'streak' not in feat:
+            # ATS rates: fill with 0.5 (50% - neutral)
+            train[feat] = train[feat].fillna(0.5)
+            test[feat] = test[feat].fillna(0.5)
+        elif 'rest' in feat:
+            # Rest days: fill with median
+            median_val = train[feat].median()
+            train[feat] = train[feat].fillna(median_val)
+            test[feat] = test[feat].fillna(median_val)
+        elif 'games_played' in feat:
+            # Games played: fill with 0 (start of season)
+            train[feat] = train[feat].fillna(0)
+            test[feat] = test[feat].fillna(0)
+        else:
+            # Everything else: fill with 0 (neutral differential)
+            train[feat] = train[feat].fillna(0)
+            test[feat] = test[feat].fillna(0)
+
+# For matchup features, fill with 0 (no advantage)
+matchup_features = [f for f in feature_columns if any(x in f for x in ['matchup', 'mismatch', 'pace'])]
+for feat in matchup_features:
+    if feat in train.columns:
+        train[feat] = train[feat].fillna(0)
+        test[feat] = test[feat].fillna(0)
+
+# For all other features, fill with median
+for feat in feature_columns:
+    if feat in train.columns and train[feat].isna().any():
+        median_val = train[feat].median()
+        train[feat] = train[feat].fillna(median_val)
+        test[feat] = test[feat].fillna(median_val)
+
+# NOW drop any remaining rows with missing target
+train_clean = train.dropna(subset=[target])
+test_clean = test.dropna(subset=[target])
+
+print(f"\nTraining data after cleaning: {len(train_clean)} games ({len(train_clean)/len(train)*100:.1f}%)")
 print(f"Testing data after cleaning: {len(test_clean)} games ({len(test_clean)/len(test)*100:.1f}%)")
 
 # Prepare data
@@ -51,7 +145,6 @@ X_train = train_clean[feature_columns]
 y_train = train_clean[target]
 X_test = test_clean[feature_columns]
 y_test = test_clean[target]
-test_spreads = test_clean['spread']
 
 print(f"\nFeatures used: {len(feature_columns)}")
 print(f"Training set size: {len(X_train)}")
@@ -109,19 +202,10 @@ for name, model in models.items():
     print(f"  Training: {train_acc*100:.2f}%")
     print(f"  Testing:  {test_acc*100:.2f}%")
     
-    # Calculate betting metrics (assuming -110 odds, need to win 52.38% to break even)
-    # Simulate betting: bet $100 on every game where model predicts home covers
-    home_bets = test_pred == 1
-    home_wins = (test_pred == 1) & (y_test == 1)
-    home_losses = (test_pred == 1) & (y_test == 0)
-    
-    away_bets = test_pred == 0
-    away_wins = (test_pred == 0) & (y_test == 0)
-    away_losses = (test_pred == 0) & (y_test == 1)
-    
+    # Calculate betting metrics
     total_bets = len(test_pred)
-    total_wins = home_wins.sum() + away_wins.sum()
-    total_losses = home_losses.sum() + away_losses.sum()
+    total_wins = (test_pred == y_test).sum()
+    total_losses = total_bets - total_wins
     
     # At -110 odds: win $100 for a win, lose $110 for a loss
     profit = (total_wins * 100) - (total_losses * 110)
@@ -137,12 +221,12 @@ for name, model in models.items():
     
     # Feature importance (for tree models)
     if hasattr(model, 'feature_importances_'):
-        print(f"\nTop 5 Most Important Features:")
+        print(f"\nTop 10 Most Important Features:")
         importances = pd.DataFrame({
             'feature': feature_columns,
             'importance': model.feature_importances_
         }).sort_values('importance', ascending=False)
-        for idx, row in importances.head(5).iterrows():
+        for idx, row in importances.head(10).iterrows():
             print(f"  {row['feature']}: {row['importance']:.4f}")
     
     # Store results
@@ -194,7 +278,6 @@ best_pred_df['prediction_correct'] = (best_pred_df['predicted_home_covered'] == 
 output_file = 'predictions_with_best_model.csv'
 best_pred_df.to_csv(output_file, index=False)
 print(f"Saved predictions to: {output_file}")
-print(f"Columns include: game info, predictions, probabilities, and whether prediction was correct")
 
 # Analysis by confidence level
 print("\n" + "=" * 80)

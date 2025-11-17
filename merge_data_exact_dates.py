@@ -208,10 +208,18 @@ def load_all_date_stats():
             # 6: adjde, 7: de_rank, 8: barthag, 9: barthag_rank...
             
             if df.columns[0] == '0':  # If columns are numbered strings
-                # Create proper column names
-                col_names = ['rank', 'team', 'conf', 'record', 'adjoe', 'oe_rank',
-                            'adjde', 'de_rank', 'barthag', 'barthag_rank']
-                # Add generic names for remaining columns
+                # Create proper column names based on Barttorvik structure
+                col_names = [
+                    'rank', 'team', 'conf', 'record', 
+                    'adjoe', 'oe_rank', 'adjde', 'de_rank', 'barthag', 'barthag_rank',
+                    'proj_w', 'proj_l', 'proj_conf_w', 'proj_conf_l', 'conf_record',
+                    'sos', 'ncsos', 'conf_sos', 
+                    'efg_pct', 'efgd_pct', 'tor', 'tord', 
+                    'orb', 'drb', 'ftr', 'ftrd',
+                    'twop_pct', 'twopd_pct', 'threep_pct', 'threepd_pct',
+                    'threep_rate', 'threed_rate', 'adjt'
+                ]
+                # Add generic names for any remaining columns
                 while len(col_names) < len(df.columns):
                     col_names.append(f'col_{len(col_names)}')
                 
@@ -340,7 +348,7 @@ def create_features(df):
     
     print("\n[FEATURES] Creating differential features...")
     
-    # Key differential features
+    # Core efficiency features
     if 'home_adjoe' in df.columns and 'away_adjoe' in df.columns:
         df['adjoe_diff'] = df['home_adjoe'] - df['away_adjoe']
     
@@ -353,11 +361,58 @@ def create_features(df):
     if 'home_barthag' in df.columns and 'away_barthag' in df.columns:
         df['barthag_diff'] = df['home_barthag'] - df['away_barthag']
     
+    # Ranking features
     if 'home_rank' in df.columns and 'away_rank' in df.columns:
         df['rank_diff'] = df['away_rank'] - df['home_rank']
     
+    # Strength of schedule features
     if 'home_sos' in df.columns and 'away_sos' in df.columns:
         df['sos_diff'] = df['home_sos'] - df['away_sos']
+    
+    if 'home_ncsos' in df.columns and 'away_ncsos' in df.columns:
+        df['ncsos_diff'] = df['home_ncsos'] - df['away_ncsos']
+    
+    # Shooting efficiency features
+    if 'home_efg_pct' in df.columns and 'away_efg_pct' in df.columns:
+        df['efg_pct_diff'] = df['home_efg_pct'] - df['away_efg_pct']
+    
+    if 'home_efgd_pct' in df.columns and 'away_efgd_pct' in df.columns:
+        df['efgd_pct_diff'] = df['home_efgd_pct'] - df['away_efgd_pct']
+    
+    # Turnover features
+    if 'home_tor' in df.columns and 'away_tor' in df.columns:
+        df['tor_diff'] = df['home_tor'] - df['away_tor']
+    
+    if 'home_tord' in df.columns and 'away_tord' in df.columns:
+        df['tord_diff'] = df['home_tord'] - df['away_tord']
+    
+    # Rebounding features
+    if 'home_orb' in df.columns and 'away_orb' in df.columns:
+        df['orb_diff'] = df['home_orb'] - df['away_orb']
+    
+    if 'home_drb' in df.columns and 'away_drb' in df.columns:
+        df['drb_diff'] = df['home_drb'] - df['away_drb']
+    
+    # Free throw features
+    if 'home_ftr' in df.columns and 'away_ftr' in df.columns:
+        df['ftr_diff'] = df['home_ftr'] - df['away_ftr']
+    
+    if 'home_ftrd' in df.columns and 'away_ftrd' in df.columns:
+        df['ftrd_diff'] = df['home_ftrd'] - df['away_ftrd']
+    
+    # 2-point shooting features
+    if 'home_twop_pct' in df.columns and 'away_twop_pct' in df.columns:
+        df['twop_pct_diff'] = df['home_twop_pct'] - df['away_twop_pct']
+    
+    if 'home_twopd_pct' in df.columns and 'away_twopd_pct' in df.columns:
+        df['twopd_pct_diff'] = df['home_twopd_pct'] - df['away_twopd_pct']
+    
+    # 3-point shooting features
+    if 'home_threep_pct' in df.columns and 'away_threep_pct' in df.columns:
+        df['threep_pct_diff'] = df['home_threep_pct'] - df['away_threep_pct']
+    
+    if 'home_threepd_pct' in df.columns and 'away_threepd_pct' in df.columns:
+        df['threepd_pct_diff'] = df['home_threepd_pct'] - df['away_threepd_pct']
     
     print(f"[OK] Created {len([c for c in df.columns if '_diff' in c])} differential features")
     

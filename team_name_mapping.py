@@ -9,6 +9,18 @@ This mapping handles the conversion.
 
 # Mapping: Odds API name -> Barttorvik name
 TEAM_NAME_MAPPING = {
+    # NEW MAPPINGS FOR MISSING TEAMS (ADD THESE AT THE TOP)
+    "South Ala.": "South Alabama",
+    "Grambling St Tigers": "Grambling St.",
+    "Alabama A&M Bulldogs": "Alabama A&M",
+    "St. Thomas MN": "St. Thomas",
+    "Central Mich.": "Central Michigan",
+    "UMass Lowell River Hawks": "UMass Lowell",
+    "Southern Miss.": "Southern Miss",
+    "Loyola (Chi) Ramblers": "Loyola Chicago",
+    "Charleston Southern Buccaneers": "Charleston Southern",
+    "UL Monroe Warhawks": "Louisiana Monroe",
+    
     # Full names to short names
     "Akron Zips": "Akron",
     "Alabama Crimson Tide": "Alabama",
