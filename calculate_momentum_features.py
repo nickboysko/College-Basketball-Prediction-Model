@@ -228,8 +228,59 @@ def calculate_all_differentials(df):
     
     return df
 
+def standardize_column_names(df):
+    """
+    Standardize column names to match what the model expects
+    This is critical - model looks for specific column names!
+    """
+    print("\n[STANDARDIZE] Renaming columns to match model expectations...")
+    
+    column_mapping = {
+        # Four Factors - Offense
+        'eFG%_team': 'efg_pct_team',
+        'TO%_team': 'tor_team',
+        'OR%_team': 'orb_team',
+        'DR%_team': 'drb_team',
+        'FTR_team': 'ftr_team',
+        '2p%_team': 'twop_pct_team',
+        '3P%_team': 'threep_pct_team',
+        '3P rate_team': 'threep_rate_team',
+        
+        # Four Factors - Defense
+        'eFG% Def_team': 'efgd_pct_team',
+        'TO% Def._team': 'tord_team',
+        'FTR Def_team': 'ftrd_team',
+        '2p%D_team': 'twopd_pct_team',
+        '3pD%_team': 'threepd_pct_team',
+        '3P rate D_team': 'threed_rate_team',
+        
+        # Same for opponent
+        'eFG%_opp': 'efg_pct_opp',
+        'TO%_opp': 'tor_opp',
+        'OR%_opp': 'orb_opp',
+        'DR%_opp': 'drb_opp',
+        'FTR_opp': 'ftr_opp',
+        '2p%_opp': 'twop_pct_opp',
+        '3P%_opp': 'threep_pct_opp',
+        '3P rate_opp': 'threep_rate_opp',
+        'eFG% Def_opp': 'efgd_pct_opp',
+        'TO% Def._opp': 'tord_opp',
+        'FTR Def_opp': 'ftrd_opp',
+        '2p%D_opp': 'twopd_pct_opp',
+        '3pD%_opp': 'threepd_pct_opp',
+        '3P rate D_opp': 'threed_rate_opp',
+    }
+    
+    # Only rename columns that exist
+    cols_to_rename = {k: v for k, v in column_mapping.items() if k in df.columns}
+    df = df.rename(columns=cols_to_rename)
+    
+    print(f"[OK] Renamed {len(cols_to_rename)} columns")
+    
+    return df
+
 def add_momentum_to_predictions(predictions_file, game_history_file='current_season_games.xlsx', 
-                                output_file='predictions_with_momentum.xlsx'):
+                                output_file='todays_games_with_momentum.csv'):
     """
     Add momentum features to prediction file
     """
@@ -310,6 +361,9 @@ def add_momentum_to_predictions(predictions_file, game_history_file='current_sea
     if 'barthag_team' in predictions_enhanced.columns:
         predictions_enhanced['home_barthag'] = predictions_enhanced['barthag_team']
         predictions_enhanced['away_barthag'] = predictions_enhanced['barthag_opp']
+    
+    # CRITICAL: Standardize column names to match model
+    predictions_enhanced = standardize_column_names(predictions_enhanced)
     
     # Save
     if output_file.endswith('.xlsx'):

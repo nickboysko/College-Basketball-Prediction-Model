@@ -6,14 +6,13 @@ import io
 import numpy as np
 from datetime import datetime
 from openpyxl import load_workbook
-from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Set UTF-8 encoding for Windows console
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 print("="*80)
-print("GENERATING PREDICTIONS WITH MOMENTUM & TRACKING")
+print("GENERATING PREDICTIONS WITH FILTERS & VALIDATION")
 print("="*80)
 
 # Load the trained model
@@ -61,37 +60,79 @@ if len(merged) == 0:
     print("\n[WARN] No games to predict!")
     sys.exit(0)
 
+# DIAGNOSTIC: Check what columns we actually have
+print("\n" + "="*80)
+print("FEATURE VALIDATION")
+print("="*80)
+
+print(f"\n[CHECK] Verifying critical features exist...")
+critical_features = ['adjoe_diff', 'adjde_diff', 'barthag_diff', 'spread', 
+                     'home_ats_last_5', 'away_ats_last_5', 'home_games_played']
+
+missing_critical = []
+for feat in critical_features:
+    if feat not in merged.columns:
+        missing_critical.append(feat)
+        print(f"  ❌ MISSING: {feat}")
+    else:
+        # Check if it's all zeros or all same value
+        unique_vals = merged[feat].nunique()
+        if unique_vals == 1:
+            print(f"  ⚠️  WARNING: {feat} has only 1 unique value (may be defaulted)")
+        else:
+            print(f"  ✅ {feat}: {unique_vals} unique values")
+
+if missing_critical:
+    print(f"\n[ERROR] Missing {len(missing_critical)} critical features!")
+    print("[HELP] Check your data pipeline - features may not be calculating correctly")
+
 # Build feature dataframe matching model's expectations
 print(f"\n[BUILD] Preparing {len(model_features)} features for model...")
 
-# Create feature dataframe
 X = pd.DataFrame()
+features_found = 0
+features_filled = 0
 
 for feat in model_features:
     if feat in merged.columns:
         X[feat] = merged[feat]
+        features_found += 1
     else:
         # Try common mappings
+        mapped = False
         if feat == 'home_adjoe' and 'adjoe_team' in merged.columns:
             X[feat] = merged['adjoe_team']
+            mapped = True
         elif feat == 'away_adjoe' and 'adjoe_opp' in merged.columns:
             X[feat] = merged['adjoe_opp']
+            mapped = True
         elif feat == 'home_adjde' and 'adjde_team' in merged.columns:
             X[feat] = merged['adjde_team']
+            mapped = True
         elif feat == 'away_adjde' and 'adjde_opp' in merged.columns:
             X[feat] = merged['adjde_opp']
+            mapped = True
         elif feat == 'home_barthag' and 'barthag_team' in merged.columns:
             X[feat] = merged['barthag_team']
+            mapped = True
         elif feat == 'away_barthag' and 'barthag_opp' in merged.columns:
             X[feat] = merged['barthag_opp']
+            mapped = True
+        
+        if mapped:
+            features_found += 1
         else:
-            print(f"[WARN] Feature '{feat}' not found, filling with 0")
             X[feat] = 0
+            features_filled += 1
 
 print(f"[OK] Built feature matrix: {X.shape}")
+print(f"[INFO] Features found: {features_found}/{len(model_features)}")
+if features_filled > 0:
+    print(f"[WARN] Features filled with 0: {features_filled}/{len(model_features)}")
+    print(f"[WARN] Model may underperform due to missing features!")
 
 # Handle missing values (same as training)
-print(f"[CLEAN] Handling missing values...")
+print(f"\n[CLEAN] Handling missing values...")
 
 momentum_features = [f for f in X.columns if any(x in f for x in ['ats', 'streak', 'rest', 'trend', 'opp_strength', 'games_played'])]
 for feat in momentum_features:
@@ -138,29 +179,52 @@ try:
     
     print(f"[OK] Predictions generated")
     
-    # Add confidence levels with HIGHER thresholds
-    def get_confidence(prob):
+    # Add confidence levels with STRICT thresholds and filters
+    def get_confidence(row):
+        prob = row['predicted_cover_prob']
+        spread = row['spread']
+        home_games = row.get('home_games_played', 10)
+        away_games = row.get('away_games_played', 10)
+        
         distance_from_50 = abs(prob - 0.5)
-        if distance_from_50 > 0.25:  # >75% or <25%
+        
+        # Early season penalty - reduce confidence
+        if home_games < 7 or away_games < 7:
+            distance_from_50 = distance_from_50 * 0.8
+        
+        # FILTER OUT problem scenarios
+        # 1. Large favorites (spread < -15) - model is terrible here
+        if spread < -15:
+            return 'SKIP'
+        
+        # 2. Death zone (spread -15 to -10) unless very confident
+        if -15 <= spread <= -10 and distance_from_50 < 0.30:
+            return 'SKIP'
+        
+        # 3. STRICTER thresholds
+        if distance_from_50 > 0.30:  # 80%+ probability
             return 'HIGH'
-        elif distance_from_50 > 0.15:  # >65% or <35%
+        elif distance_from_50 > 0.15:  # 65%+ probability
             return 'MEDIUM'
-        elif distance_from_50 > 0.05:  # >55% or <45%
+        elif distance_from_50 > 0.05:  # 55%+ probability
             return 'LOW'
         else:
             return 'SKIP'  # Too close to 50/50
     
-    merged_for_output['confidence'] = merged_for_output['predicted_cover_prob'].apply(get_confidence)
+    merged_for_output['confidence'] = merged_for_output.apply(get_confidence, axis=1)
     
-    # FILTER OUT SKIP BETS - Don't even include them
-    print(f"\n[FILTER] Removing games too close to 50/50...")
+    # FILTER OUT SKIP BETS
+    print(f"\n[FILTER] Removing games that don't meet criteria...")
     before_filter = len(merged_for_output)
     merged_for_output = merged_for_output[merged_for_output['confidence'] != 'SKIP'].copy()
     after_filter = len(merged_for_output)
     skipped = before_filter - after_filter
     
     if skipped > 0:
-        print(f"[FILTER] Skipped {skipped} games (too close to coin flip)")
+        print(f"[FILTER] Skipped {skipped} games:")
+        print(f"  - Large favorites (< -15 spread)")
+        print(f"  - Death zone games without high confidence")
+        print(f"  - Games too close to 50/50")
     
     if len(merged_for_output) == 0:
         print("\n[WARN] No games meet confidence threshold!")
@@ -211,8 +275,13 @@ try:
         'notes',
         'adjoe_diff',
         'adjde_diff', 
-        'barthag_diff'
+        'barthag_diff',
+        'home_games_played',
+        'away_games_played'
     ]
+    
+    # Only include columns that exist
+    output_columns = [col for col in output_columns if col in merged_for_output.columns]
     
     output = merged_for_output[output_columns].copy()
     
@@ -256,7 +325,7 @@ try:
     print("="*80)
     
     print(f"\nTotal games analyzed: {before_filter}")
-    print(f"Games with edge: {len(output)} (skipped {skipped} close to 50/50)")
+    print(f"Games with edge: {len(output)} (skipped {skipped})")
     print(f"\nConfidence breakdown:")
     print(output['confidence'].value_counts().to_string())
     
@@ -266,7 +335,8 @@ try:
     if len(high_conf) > 0:
         print(f"\n[BETS] HIGH Confidence Picks ({len(high_conf)} games):")
         print("-"*80)
-        print("📊 BACKTESTED PERFORMANCE: 68.9% accuracy, 31.5% ROI")
+        print("NOTE: Live performance tracking at 50% - use caution")
+        print("Backtested: 68.9% accuracy | Current live: 50%")
         print("-"*80)
         for i, (idx, row) in enumerate(high_conf.head(15).iterrows(), 1):
             prob = row['predicted_cover_prob']
@@ -279,8 +349,11 @@ try:
                 display_prob = (1 - prob) * 100
                 display_spread = -row['spread']
             
+            home_gp = row.get('home_games_played', '?')
+            away_gp = row.get('away_games_played', '?')
+            
             print(f"{i:2d}. {team_name:25} {display_spread:+6.1f}")
-            print(f"    Model confidence: {display_prob:5.1f}%")
+            print(f"    Confidence: {display_prob:5.1f}% | Games played: H:{home_gp} A:{away_gp}")
         
         if len(high_conf) > 15:
             print(f"\n    ... and {len(high_conf)-15} more HIGH confidence picks")
@@ -293,7 +366,7 @@ try:
     if len(med_conf) > 0:
         print(f"\n[BETS] MEDIUM Confidence Picks ({len(med_conf)} games):")
         print("-"*80)
-        print("📊 BACKTESTED PERFORMANCE: 60.1% accuracy")
+        print("Live performance: 61.1% accuracy")
         print("-"*80)
         for i, (idx, row) in enumerate(med_conf.head(5).iterrows(), 1):
             prob = row['predicted_cover_prob']
@@ -307,7 +380,7 @@ try:
                 display_spread = -row['spread']
             
             print(f"{i:2d}. {team_name:25} {display_spread:+6.1f}")
-            print(f"    Model confidence: {display_prob:5.1f}%")
+            print(f"    Confidence: {display_prob:5.1f}%")
         
         if len(med_conf) > 5:
             print(f"\n    ... and {len(med_conf)-5} more MEDIUM confidence picks")
@@ -316,20 +389,20 @@ try:
     low_conf = output[output['confidence'] == 'LOW']
     
     if len(low_conf) > 0:
-        print(f"\n[INFO] LOW Confidence: {len(low_conf)} games (slight edge)")
+        print(f"\n[INFO] LOW Confidence: {len(low_conf)} games (track only)")
     
     print("\n" + "="*80)
     print("✅ PREDICTIONS COMPLETE!")
     print("="*80)
     print(f"\n[OUTPUT] CSV: {CSV_FILE}")
     print(f"[OUTPUT] Excel Tracker: {EXCEL_FILE} (Sheet: {sheet_name})")
-    print(f"\n[THRESHOLDS] New confidence levels:")
-    print(f"  HIGH: >75% or <25% (was >70% or <30%)")
-    print(f"  MEDIUM: >65% or <35% (was >60% or <40%)")
-    print(f"  LOW: >55% or <45% (was all remaining)")
-    print(f"  SKIP: 45-55% (not included in output)")
-    print(f"\n[STRATEGY] Track all predictions to validate model performance")
-    print(f"[STRATEGY] Focus betting on HIGH confidence (if performance improves)")
+    print(f"\n[FILTERS APPLIED]:")
+    print(f"  ✓ Filtered out spreads < -15 (large favorites)")
+    print(f"  ✓ Avoided -15 to -10 range without 80%+ confidence")
+    print(f"  ✓ Applied early season penalty (< 7 games)")
+    print(f"  ✓ Raised HIGH confidence threshold to 80%")
+    print(f"  ✓ Skipped games within 45-55% range")
+    print(f"\n[STRATEGY] Focus on MEDIUM confidence (performing at 61%)")
     print("="*80)
     
 except Exception as e:
