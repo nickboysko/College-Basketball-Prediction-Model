@@ -138,17 +138,33 @@ try:
     
     print(f"[OK] Predictions generated")
     
-    # Add confidence levels
+    # Add confidence levels with HIGHER thresholds
     def get_confidence(prob):
         distance_from_50 = abs(prob - 0.5)
-        if distance_from_50 > 0.20:  # >70% or <30%
+        if distance_from_50 > 0.25:  # >75% or <25%
             return 'HIGH'
-        elif distance_from_50 > 0.10:  # >60% or <40%
+        elif distance_from_50 > 0.15:  # >65% or <35%
             return 'MEDIUM'
-        else:
+        elif distance_from_50 > 0.05:  # >55% or <45%
             return 'LOW'
+        else:
+            return 'SKIP'  # Too close to 50/50
     
     merged_for_output['confidence'] = merged_for_output['predicted_cover_prob'].apply(get_confidence)
+    
+    # FILTER OUT SKIP BETS - Don't even include them
+    print(f"\n[FILTER] Removing games too close to 50/50...")
+    before_filter = len(merged_for_output)
+    merged_for_output = merged_for_output[merged_for_output['confidence'] != 'SKIP'].copy()
+    after_filter = len(merged_for_output)
+    skipped = before_filter - after_filter
+    
+    if skipped > 0:
+        print(f"[FILTER] Skipped {skipped} games (too close to coin flip)")
+    
+    if len(merged_for_output) == 0:
+        print("\n[WARN] No games meet confidence threshold!")
+        sys.exit(0)
     
     # Add recommendation
     def get_recommendation(row):
@@ -156,18 +172,20 @@ try:
         conf = row['confidence']
         
         if prob > 0.50:
-            favorite = row['team']
+            pick = row['team']
+            pick_spread = row['spread']
             confidence_pct = prob * 100
         else:
-            favorite = row['opp']
+            pick = row['opp']
+            pick_spread = -row['spread']
             confidence_pct = (1 - prob) * 100
         
         if conf == 'HIGH':
-            return f"BET {favorite} to COVER"
+            return f"BET {pick} {pick_spread:+.1f}"
         elif conf == 'MEDIUM':
-            return f"LEAN {favorite} (Medium confidence)"
+            return f"LEAN {pick} {pick_spread:+.1f}"
         else:
-            return "SKIP - Low confidence"
+            return f"CONSIDER {pick} {pick_spread:+.1f}"
     
     merged_for_output['recommendation'] = merged_for_output.apply(get_recommendation, axis=1)
     
@@ -237,7 +255,8 @@ try:
     print("PREDICTION SUMMARY")
     print("="*80)
     
-    print(f"\nTotal games: {len(output)}")
+    print(f"\nTotal games analyzed: {before_filter}")
+    print(f"Games with edge: {len(output)} (skipped {skipped} close to 50/50)")
     print(f"\nConfidence breakdown:")
     print(output['confidence'].value_counts().to_string())
     
@@ -245,7 +264,7 @@ try:
     high_conf = output[output['confidence'] == 'HIGH']
     
     if len(high_conf) > 0:
-        print(f"\n[BETS] HIGH Confidence Recommendations ({len(high_conf)} games):")
+        print(f"\n[BETS] HIGH Confidence Picks ({len(high_conf)} games):")
         print("-"*80)
         print("📊 BACKTESTED PERFORMANCE: 68.9% accuracy, 31.5% ROI")
         print("-"*80)
@@ -254,23 +273,25 @@ try:
             if prob > 0.50:
                 team_name = row['team']
                 display_prob = prob * 100
+                display_spread = row['spread']
             else:
                 team_name = row['opp']
                 display_prob = (1 - prob) * 100
+                display_spread = -row['spread']
             
-            print(f"{i:2d}. {team_name:25} (Spread: {row['spread']:+6.1f})")
-            print(f"    Confidence: {display_prob:5.1f}% | {row['recommendation']}")
+            print(f"{i:2d}. {team_name:25} {display_spread:+6.1f}")
+            print(f"    Model confidence: {display_prob:5.1f}%")
         
         if len(high_conf) > 15:
-            print(f"\n    ... and {len(high_conf)-15} more HIGH confidence bets")
+            print(f"\n    ... and {len(high_conf)-15} more HIGH confidence picks")
     else:
-        print("\n[INFO] No HIGH confidence bets today")
+        print("\n[INFO] No HIGH confidence picks today")
     
     # Show MEDIUM confidence
     med_conf = output[output['confidence'] == 'MEDIUM']
     
     if len(med_conf) > 0:
-        print(f"\n[BETS] MEDIUM Confidence Bets ({len(med_conf)} games):")
+        print(f"\n[BETS] MEDIUM Confidence Picks ({len(med_conf)} games):")
         print("-"*80)
         print("📊 BACKTESTED PERFORMANCE: 60.1% accuracy")
         print("-"*80)
@@ -279,26 +300,36 @@ try:
             if prob > 0.50:
                 team_name = row['team']
                 display_prob = prob * 100
+                display_spread = row['spread']
             else:
                 team_name = row['opp']
                 display_prob = (1 - prob) * 100
+                display_spread = -row['spread']
             
-            print(f"{i:2d}. {team_name:25} (Spread: {row['spread']:+6.1f})")
-            print(f"    Confidence: {display_prob:5.1f}% | {row['recommendation']}")
+            print(f"{i:2d}. {team_name:25} {display_spread:+6.1f}")
+            print(f"    Model confidence: {display_prob:5.1f}%")
+        
+        if len(med_conf) > 5:
+            print(f"\n    ... and {len(med_conf)-5} more MEDIUM confidence picks")
+    
+    # Show LOW confidence summary
+    low_conf = output[output['confidence'] == 'LOW']
+    
+    if len(low_conf) > 0:
+        print(f"\n[INFO] LOW Confidence: {len(low_conf)} games (slight edge)")
     
     print("\n" + "="*80)
-    print("✅ PREDICTIONS COMPLETE WITH MOMENTUM FEATURES!")
+    print("✅ PREDICTIONS COMPLETE!")
     print("="*80)
     print(f"\n[OUTPUT] CSV: {CSV_FILE}")
     print(f"[OUTPUT] Excel Tracker: {EXCEL_FILE} (Sheet: {sheet_name})")
-    print(f"\n[MODEL] Using 58.3% accurate model with 47 features including:")
-    print("  ✓ Team efficiency stats (adjoe, adjde, barthag)")
-    print("  ✓ Shooting splits (3PT%, 2PT%, eFG%)")
-    print("  ✓ Momentum features (ATS last 5/10, streaks)")
-    print("  ✓ Rest/schedule factors")
-    print(f"\n[STRATEGY] Focus on HIGH confidence (68.9% win rate in backtest)")
-    print(f"[STRATEGY] MEDIUM confidence bets are secondary (60.1% win rate)")
-    print(f"[STRATEGY] SKIP low confidence bets (too close to coin flip)")
+    print(f"\n[THRESHOLDS] New confidence levels:")
+    print(f"  HIGH: >75% or <25% (was >70% or <30%)")
+    print(f"  MEDIUM: >65% or <35% (was >60% or <40%)")
+    print(f"  LOW: >55% or <45% (was all remaining)")
+    print(f"  SKIP: 45-55% (not included in output)")
+    print(f"\n[STRATEGY] Track all predictions to validate model performance")
+    print(f"[STRATEGY] Focus betting on HIGH confidence (if performance improves)")
     print("="*80)
     
 except Exception as e:
